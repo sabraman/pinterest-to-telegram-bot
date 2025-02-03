@@ -39,6 +39,7 @@ curl -X POST "https://api.telegram.org/botYOUR_BOT_TOKEN/setWebhook?url=https://
    - `TELEGRAM_BOT_TOKEN`
    - `TELEGRAM_CHANNEL_ID`
    - `ADMIN_ID`
+   - `PINTEREST_FEED`
 3. Set your bot's webhook URL by opening this in your browser (replace the values in `<...>`):
 ```text
 https://api.telegram.org/bot<BOT_TOKEN>/setWebhook?url=https://<PROJECT_NAME>.deno.dev/<BOT_TOKEN>
