@@ -13,8 +13,8 @@ A bot for automatic publishing of pins from Pinterest RSS feed to a Telegram cha
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/sabraman/pinterest-to-telegram.git
-cd pinterest-to-telegram
+git clone https://github.com/sabraman/pinterest-to-telegram-bot.git
+cd pinterest-to-telegram-bot
 ```
 
 2. Create `.env` file with the following variables:
