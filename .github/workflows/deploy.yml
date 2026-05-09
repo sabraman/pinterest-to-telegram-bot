@@ -47,7 +47,14 @@ jobs:
 
       - name: Ensure application directory
         run: |
-          ssh -i ~/.ssh/deploy_key -p "$VPS_PORT" "$VPS_USER@$VPS_HOST" "mkdir -p '$APP_DIR'"
+          ssh -i ~/.ssh/deploy_key -p "$VPS_PORT" "$VPS_USER@$VPS_HOST" "
+            set -e
+            mkdir -p '$APP_DIR'
+            if ! command -v rsync >/dev/null 2>&1; then
+              apt-get update
+              DEBIAN_FRONTEND=noninteractive apt-get install -y rsync
+            fi
+          "
 
       - name: Sync application files
         run: |
