@@ -2,7 +2,7 @@ import { XMLParser } from "fast-xml-parser";
 import { config } from "../config/env.ts";
 import * as storage from "../services/storage.ts";
 import type { RssEntry } from "../types/index.ts";
-import { parseRssEntry } from "../utils/helpers.ts";
+import { extractMediaFromHtml, mediaIdentity, parseRssEntry, uniqueMediaItems } from "../utils/helpers.ts";
 
 const parser = new XMLParser({
   ignoreAttributes: false,
@@ -21,6 +21,25 @@ function entriesFromFeed(xml: string): RssEntry[] {
   const entries = rssItems ?? atomEntries ?? [];
 
   return Array.isArray(entries) ? entries : [entries];
+}
+
+async function resolvePinPageMedia(pinUrl: string | undefined) {
+  if (!pinUrl) return [];
+
+  console.log(`Resolving Pinterest media from pin page: ${pinUrl}`);
+  const response = await fetch(pinUrl, {
+    signal: AbortSignal.timeout(config.fetchTimeoutSeconds * 1000),
+    headers: {
+      "user-agent": "pinterest-to-telegram-bot/1.0",
+      accept: "text/html",
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Pinterest pin page returned HTTP ${response.status}`);
+  }
+
+  return extractMediaFromHtml(await response.text());
 }
 
 export async function fetchAndStorePins(): Promise<number> {
@@ -43,8 +62,42 @@ export async function fetchAndStorePins(): Promise<number> {
 
   for (const entry of entries) {
     const pin = parseRssEntry(entry);
-    if (!pin.guid || !pin.imageUrl) {
+    const existingPin = pin.guid ? storage.getPin(pin.guid) : null;
+    const shouldEnrich = !existingPin
+      || (
+        (existingPin.status === "pending" || existingPin.status === "failed")
+        && existingPin.mediaType === "photo"
+      );
+
+    if (pin.guid && shouldEnrich) {
+      try {
+        const resolvedMedia = await resolvePinPageMedia(pin.sourceUrl);
+        const rssIdentities = new Set(pin.mediaItems.map(mediaIdentity));
+        const matchingResolvedMedia = resolvedMedia.filter((item) => rssIdentities.has(mediaIdentity(item)));
+        const enrichedMedia = pin.mediaItems.length === 0
+          ? resolvedMedia
+          : uniqueMediaItems([
+            ...(matchingResolvedMedia.length > 0 ? matchingResolvedMedia : []),
+            ...pin.mediaItems,
+          ]);
+        const primaryMedia = enrichedMedia[0];
+        if (primaryMedia) {
+          pin.mediaItems = enrichedMedia;
+          pin.mediaType = primaryMedia.type;
+          pin.imageUrl = primaryMedia.url;
+        }
+      } catch (error) {
+        console.error(`Could not resolve media for ${pin.guid}:`, error);
+      }
+    }
+
+    if (!pin.guid || pin.mediaItems.length === 0) {
       skipped++;
+      continue;
+    }
+
+    if (existingPin) {
+      storage.updateQueuedPinMedia(pin);
       continue;
     }
 

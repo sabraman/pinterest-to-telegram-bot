@@ -1,6 +1,15 @@
+export type MediaType = "photo" | "video" | "animation";
+
+export interface MediaItem {
+  type: MediaType;
+  url: string;
+}
+
 export interface Pin {
   guid: string;
   imageUrl: string;
+  mediaType: MediaType;
+  mediaItems: MediaItem[];
   sourceUrl?: string;
   published: boolean;
   pubDate: string;

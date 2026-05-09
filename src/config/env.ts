@@ -40,4 +40,5 @@ export const config = {
   queueLockSeconds: integer("QUEUE_LOCK_SECONDS", 120),
   maxPublishAttempts: integer("MAX_PUBLISH_ATTEMPTS", 5),
   fetchTimeoutSeconds: integer("FETCH_TIMEOUT_SECONDS", 30),
+  publishSendDelayMs: integer("PUBLISH_SEND_DELAY_MS", 1000),
 };

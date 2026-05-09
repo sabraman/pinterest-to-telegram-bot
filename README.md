@@ -7,6 +7,7 @@ A Bun + TypeScript bot that reads a Pinterest RSS feed and publishes queued pins
 - Bun
 - grammY long polling, no Telegram webhook
 - SQLite durable queue in `data/bot.sqlite`
+- Photo, video, GIF/animation, and carousel publishing
 - Docker Compose deployment with `restart: unless-stopped`
 
 ## Queue Behavior
@@ -17,7 +18,7 @@ RSS entries are stored once by GUID. Publish jobs move through these states:
 - `processing` - claimed by the publisher worker
 - `done` - published to Telegram
 - `failed` - waiting for retry or exhausted attempts
-- `skipped` - permanently skipped because the image or Telegram request is invalid
+- `skipped` - permanently skipped because the media or Telegram request is invalid
 
 The queue survives container restarts because SQLite is mounted from `./data`.
 
@@ -37,6 +38,7 @@ PUBLISH_RETRY_SECONDS=300
 QUEUE_LOCK_SECONDS=120
 MAX_PUBLISH_ATTEMPTS=5
 FETCH_TIMEOUT_SECONDS=30
+PUBLISH_SEND_DELAY_MS=1000
 ```
 
 ## Local Development

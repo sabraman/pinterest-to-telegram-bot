@@ -10,6 +10,7 @@ Bun.env.PUBLISH_RETRY_SECONDS = "1";
 Bun.env.QUEUE_LOCK_SECONDS = "1";
 Bun.env.MAX_PUBLISH_ATTEMPTS = "2";
 Bun.env.FETCH_TIMEOUT_SECONDS = "5";
+Bun.env.PUBLISH_SEND_DELAY_MS = "1";
 
 rmSync(Bun.env.DATABASE_PATH, { force: true });
 rmSync(`${Bun.env.DATABASE_PATH}-shm`, { force: true });
@@ -19,12 +20,16 @@ const storage = await import("./storage.ts");
 const { fetchAndStorePins } = await import("../jobs/rss.ts");
 const { publishNextPin } = await import("../jobs/publisher.ts");
 const { GrammyError } = await import("grammy");
+const { extractMediaFromHtml, parseRssEntry } = await import("../utils/helpers.ts");
 const originalFetch = globalThis.fetch;
 
 function pin(guid: string) {
+  const imageUrl = `https://example.test/${guid}.jpg`;
   return {
     guid,
-    imageUrl: `https://example.test/${guid}.jpg`,
+    imageUrl,
+    mediaType: "photo" as const,
+    mediaItems: [{ type: "photo" as const, url: imageUrl }],
     sourceUrl: `https://example.test/${guid}`,
     published: false,
     pubDate: new Date(`2026-01-0${guid.length}T00:00:00Z`).toISOString(),
@@ -130,23 +135,29 @@ describe("SQLite queue storage", () => {
 
 describe("RSS ingestion", () => {
   test("parses RSS items and skips entries without images", async () => {
-    globalThis.fetch = (async () => new Response(`
-      <rss>
-        <channel>
-          <item>
-            <guid>pin-1</guid>
-            <link>https://ru.pinterest.com/pin/1/</link>
-            <pubDate>Sat, 09 May 2026 12:00:00 GMT</pubDate>
-            <description>&lt;img src=&quot;https://i.pinimg.com/236x/example.jpg&quot; /&gt;</description>
-          </item>
-          <item>
-            <guid>pin-2</guid>
-            <link>https://ru.pinterest.com/pin/2/</link>
-            <description>No image here</description>
-          </item>
-        </channel>
-      </rss>
-    `, { status: 200 })) as unknown as typeof fetch;
+    globalThis.fetch = (async (url: URL | RequestInfo) => {
+      if (String(url).includes("feed.rss")) {
+        return new Response(`
+          <rss>
+            <channel>
+              <item>
+                <guid>pin-1</guid>
+                <link>https://ru.pinterest.com/pin/1/</link>
+                <pubDate>Sat, 09 May 2026 12:00:00 GMT</pubDate>
+                <description>&lt;img src=&quot;https://i.pinimg.com/236x/example.jpg&quot; /&gt;</description>
+              </item>
+              <item>
+                <guid>pin-2</guid>
+                <link>https://ru.pinterest.com/pin/2/</link>
+                <description>No image here</description>
+              </item>
+            </channel>
+          </rss>
+        `, { status: 200 });
+      }
+
+      return new Response("<html>No media here</html>", { status: 200 });
+    }) as unknown as typeof fetch;
 
     await expect(fetchAndStorePins()).resolves.toBe(1);
     expect(storage.getStats()).toEqual({
@@ -164,13 +175,146 @@ describe("RSS ingestion", () => {
 
     await expect(fetchAndStorePins()).rejects.toThrow("Pinterest RSS returned HTTP 503");
   });
+
+  test("parses direct video and animation media from RSS descriptions", () => {
+    const video = parseRssEntry({
+      guid: "video-pin",
+      description: '<video src="https://v.pinimg.com/videos/example.mp4"></video>',
+    });
+    expect(video.mediaType).toBe("video");
+    expect(video.mediaItems).toEqual([
+      { type: "video", url: "https://v.pinimg.com/videos/example.mp4" },
+    ]);
+
+    const animation = parseRssEntry({
+      guid: "gif-pin",
+      description: '<img src="https://i.pinimg.com/originals/example.gif">',
+    });
+    expect(animation.mediaType).toBe("animation");
+    expect(animation.mediaItems).toEqual([
+      { type: "animation", url: "https://i.pinimg.com/originals/example.gif" },
+    ]);
+  });
+
+  test("resolves empty RSS media from pin page fallback", async () => {
+    globalThis.fetch = (async (url: URL | RequestInfo) => {
+      if (String(url).includes("feed.rss")) {
+        return new Response(`
+          <rss>
+            <channel>
+              <item>
+                <guid>empty-media-pin</guid>
+                <link>https://ru.pinterest.com/pin/video/</link>
+                <description>&lt;img src=&quot;&quot;&gt;</description>
+              </item>
+            </channel>
+          </rss>
+        `, { status: 200 });
+      }
+
+      return new Response(`
+        <html>
+          <script>{"video":"https:\\/\\/v.pinimg.com\\/videos\\/clip.mp4"}</script>
+        </html>
+      `, { status: 200 });
+    }) as unknown as typeof fetch;
+
+    await expect(fetchAndStorePins()).resolves.toBe(1);
+    const claimed = storage.claimNextPin();
+    expect(claimed?.mediaType).toBe("video");
+    expect(claimed?.mediaItems).toEqual([
+      { type: "video", url: "https://v.pinimg.com/videos/clip.mp4" },
+    ]);
+  });
+
+  test("upgrades RSS thumbnails to pin page animation media", async () => {
+    globalThis.fetch = (async (url: URL | RequestInfo) => {
+      if (String(url).includes("feed.rss")) {
+        return new Response(`
+          <rss>
+            <channel>
+              <item>
+                <guid>gif-thumbnail-pin</guid>
+                <link>https://ru.pinterest.com/pin/gif/</link>
+                <description>&lt;img src=&quot;https://i.pinimg.com/236x/49/b5/d5/49b5d5ca20c0ff6ba08268a677160f1a.jpg&quot;&gt;</description>
+              </item>
+            </channel>
+          </rss>
+        `, { status: 200 });
+      }
+
+      return new Response(`
+        <html>
+          https:\\/\\/i.pinimg.com\\/originals\\/49\\/b5\\/d5\\/49b5d5ca20c0ff6ba08268a677160f1a.gif
+          https:\\/\\/i.pinimg.com\\/upload\\/board_thumbnail.jpg
+        </html>
+      `, { status: 200 });
+    }) as unknown as typeof fetch;
+
+    await expect(fetchAndStorePins()).resolves.toBe(1);
+    const claimed = storage.claimNextPin();
+    expect(claimed?.mediaType).toBe("animation");
+    expect(claimed?.mediaItems).toEqual([
+      { type: "animation", url: "https://i.pinimg.com/originals/49/b5/d5/49b5d5ca20c0ff6ba08268a677160f1a.gif" },
+    ]);
+  });
+
+  test("does not replace RSS media with unrelated pin page media", async () => {
+    globalThis.fetch = (async (url: URL | RequestInfo) => {
+      if (String(url).includes("feed.rss")) {
+        return new Response(`
+          <rss>
+            <channel>
+              <item>
+                <guid>static-pin</guid>
+                <link>https://ru.pinterest.com/pin/static/</link>
+                <description>&lt;img src=&quot;https://i.pinimg.com/236x/aa/bb/cc/aabbcc.jpg&quot;&gt;</description>
+              </item>
+            </channel>
+          </rss>
+        `, { status: 200 });
+      }
+
+      return new Response(`
+        <html>
+          https:\\/\\/i.pinimg.com\\/originals\\/11\\/22\\/33\\/112233.gif
+        </html>
+      `, { status: 200 });
+    }) as unknown as typeof fetch;
+
+    await expect(fetchAndStorePins()).resolves.toBe(1);
+    const claimed = storage.claimNextPin();
+    expect(claimed?.mediaType).toBe("photo");
+    expect(claimed?.mediaItems).toEqual([
+      { type: "photo", url: "https://i.pinimg.com/originals/aa/bb/cc/aabbcc.jpg" },
+    ]);
+  });
+
+  test("extracts and deduplicates mixed media from html", () => {
+    expect(extractMediaFromHtml(`
+      https:\\/\\/v.pinimg.com\\/videos\\/clip.mp4
+      https://i.pinimg.com/236x/example.jpg
+      https://i.pinimg.com/236x/example.jpg
+    `)).toEqual([
+      { type: "video", url: "https://v.pinimg.com/videos/clip.mp4" },
+      { type: "photo", url: "https://i.pinimg.com/originals/example.jpg" },
+    ]);
+  });
 });
 
 describe("publisher", () => {
-  function bot(sendPhoto: () => Promise<void>) {
+  function bot(api: {
+    sendPhoto?: () => Promise<void>;
+    sendVideo?: () => Promise<void>;
+    sendAnimation?: () => Promise<void>;
+    sendMediaGroup?: () => Promise<void>;
+  }) {
     return {
       api: {
-        sendPhoto,
+        sendPhoto: api.sendPhoto ?? (async () => undefined),
+        sendVideo: api.sendVideo ?? (async () => undefined),
+        sendAnimation: api.sendAnimation ?? (async () => undefined),
+        sendMediaGroup: api.sendMediaGroup ?? (async () => undefined),
       },
     };
   }
@@ -189,8 +333,10 @@ describe("publisher", () => {
     }) as unknown as typeof fetch;
 
     let sent = 0;
-    await expect(publishNextPin(bot(async () => {
+    await expect(publishNextPin(bot({
+      sendPhoto: async () => {
       sent++;
+      },
     }) as never)).resolves.toBe(true);
 
     expect(calls).toEqual(["HEAD", "GET"]);
@@ -203,8 +349,10 @@ describe("publisher", () => {
 
     globalThis.fetch = (async () => new Response("", { status: 404 })) as unknown as typeof fetch;
 
-    await expect(publishNextPin(bot(async () => {
-      throw new Error("sendPhoto should not be called");
+    await expect(publishNextPin(bot({
+      sendPhoto: async () => {
+        throw new Error("sendPhoto should not be called");
+      },
     }) as never)).resolves.toBe(false);
 
     expect(storage.getStats().skipped).toBe(1);
@@ -215,18 +363,86 @@ describe("publisher", () => {
     storage.savePin(pin("b"));
     globalThis.fetch = (async () => new Response("", { status: 200 })) as unknown as typeof fetch;
 
-    await expect(publishNextPin(bot(async () => {
-      throw new GrammyError("Call failed", {
-        ok: false,
-        error_code: 400,
-        description: "Bad Request: wrong file identifier",
-      }, "sendPhoto", {});
+    await expect(publishNextPin(bot({
+      sendPhoto: async () => {
+        throw new GrammyError("Call failed", {
+          ok: false,
+          error_code: 400,
+          description: "Bad Request: wrong file identifier",
+        }, "sendPhoto", {});
+      },
     }) as never)).resolves.toBe(false);
     expect(storage.getStats().skipped).toBe(1);
 
-    await expect(publishNextPin(bot(async () => {
-      throw new Error("network down");
+    await expect(publishNextPin(bot({
+      sendPhoto: async () => {
+        throw new Error("network down");
+      },
     }) as never)).resolves.toBe(false);
     expect(storage.getStats().failed).toBe(1);
+  });
+
+  test("routes videos, animations, and carousels to matching Telegram APIs", async () => {
+    globalThis.fetch = (async () => new Response("", { status: 200 })) as unknown as typeof fetch;
+
+    storage.savePin({
+      ...pin("video"),
+      imageUrl: "https://v.pinimg.com/videos/video.mp4",
+      mediaType: "video",
+      mediaItems: [{ type: "video", url: "https://v.pinimg.com/videos/video.mp4" }],
+    });
+    let videos = 0;
+    await publishNextPin(bot({ sendVideo: async () => { videos++; } }) as never);
+    expect(videos).toBe(1);
+
+    storage.savePin({
+      ...pin("gif"),
+      imageUrl: "https://i.pinimg.com/originals/animation.gif",
+      mediaType: "animation",
+      mediaItems: [{ type: "animation", url: "https://i.pinimg.com/originals/animation.gif" }],
+    });
+    let animations = 0;
+    await publishNextPin(bot({ sendAnimation: async () => { animations++; } }) as never);
+    expect(animations).toBe(1);
+
+    storage.savePin({
+      ...pin("album"),
+      imageUrl: "https://i.pinimg.com/originals/1.jpg",
+      mediaType: "photo",
+      mediaItems: [
+        { type: "photo", url: "https://i.pinimg.com/originals/1.jpg" },
+        { type: "video", url: "https://v.pinimg.com/videos/2.mp4" },
+      ],
+    });
+    let mediaGroups = 0;
+    await publishNextPin(bot({ sendMediaGroup: async () => { mediaGroups++; } }) as never);
+    expect(mediaGroups).toBe(1);
+  });
+
+  test("publishes mixed animation carousels as the primary media only", async () => {
+    globalThis.fetch = (async () => new Response("", { status: 200 })) as unknown as typeof fetch;
+
+    storage.savePin({
+      ...pin("mixed"),
+      imageUrl: "https://i.pinimg.com/originals/animation.gif",
+      mediaType: "animation",
+      mediaItems: [
+        { type: "animation", url: "https://i.pinimg.com/originals/animation.gif" },
+        { type: "photo", url: "https://i.pinimg.com/originals/photo.jpg" },
+      ],
+    });
+
+    let animations = 0;
+    let photos = 0;
+    let mediaGroups = 0;
+    await publishNextPin(bot({
+      sendAnimation: async () => { animations++; },
+      sendPhoto: async () => { photos++; },
+      sendMediaGroup: async () => { mediaGroups++; },
+    }) as never);
+
+    expect(animations).toBe(1);
+    expect(photos).toBe(0);
+    expect(mediaGroups).toBe(0);
   });
 });

@@ -2,7 +2,7 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { Database } from "bun:sqlite";
 import { config } from "../config/env.ts";
-import type { Pin, PinRecord, PinStatus, QueueStats } from "../types/index.ts";
+import type { MediaType, Pin, PinRecord, PinStatus, QueueStats } from "../types/index.ts";
 
 mkdirSync(dirname(config.databasePath), { recursive: true });
 
@@ -14,6 +14,8 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS pins (
     guid TEXT PRIMARY KEY,
     image_url TEXT NOT NULL,
+    media_type TEXT NOT NULL DEFAULT 'photo',
+    media_items TEXT NOT NULL DEFAULT '[]',
     source_url TEXT,
     pub_date TEXT NOT NULL,
     published INTEGER NOT NULL DEFAULT 0,
@@ -42,9 +44,25 @@ if (!columns.includes("lock_token")) {
   db.exec("ALTER TABLE pins ADD COLUMN lock_token TEXT");
 }
 
+if (!columns.includes("media_type")) {
+  db.exec("ALTER TABLE pins ADD COLUMN media_type TEXT NOT NULL DEFAULT 'photo'");
+}
+
+if (!columns.includes("media_items")) {
+  db.exec("ALTER TABLE pins ADD COLUMN media_items TEXT NOT NULL DEFAULT '[]'");
+  db.exec(`
+    UPDATE pins
+    SET media_items = json_array(json_object('type', media_type, 'url', image_url))
+    WHERE image_url != ''
+      AND (media_items = '[]' OR media_items IS NULL)
+  `);
+}
+
 interface PinRow {
   guid: string;
   image_url: string;
+  media_type: MediaType;
+  media_items: string;
   source_url: string | null;
   pub_date: string;
   published: number;
@@ -57,9 +75,13 @@ interface PinRow {
 }
 
 function mapPin(row: PinRow): PinRecord {
+  const mediaItems = parseMediaItems(row.media_items, row.media_type, row.image_url);
+
   return {
     guid: row.guid,
     imageUrl: row.image_url,
+    mediaType: mediaItems[0]?.type ?? "photo",
+    mediaItems,
     sourceUrl: row.source_url ?? undefined,
     published: row.published === 1,
     pubDate: row.pub_date,
@@ -72,6 +94,21 @@ function mapPin(row: PinRow): PinRecord {
   };
 }
 
+function parseMediaItems(raw: string, mediaType: string, imageUrl: string): Pin["mediaItems"] {
+  try {
+    const parsed = JSON.parse(raw) as Pin["mediaItems"];
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      return parsed.filter((item) => item.url && item.type);
+    }
+  } catch {
+    // Fall back to legacy image_url below.
+  }
+
+  return imageUrl
+    ? [{ type: mediaType === "video" || mediaType === "animation" ? mediaType : "photo", url: imageUrl }]
+    : [];
+}
+
 export function closeStorage(): void {
   db.close();
 }
@@ -79,14 +116,47 @@ export function closeStorage(): void {
 export function savePin(pin: Pin): boolean {
   const result = db
     .query(`
-      INSERT OR IGNORE INTO pins (guid, image_url, source_url, pub_date)
-      VALUES ($guid, $imageUrl, $sourceUrl, $pubDate)
+      INSERT OR IGNORE INTO pins (guid, image_url, media_type, media_items, source_url, pub_date)
+      VALUES ($guid, $imageUrl, $mediaType, $mediaItems, $sourceUrl, $pubDate)
     `)
     .run({
       $guid: pin.guid,
       $imageUrl: pin.imageUrl,
+      $mediaType: pin.mediaType,
+      $mediaItems: JSON.stringify(pin.mediaItems),
       $sourceUrl: pin.sourceUrl ?? null,
       $pubDate: pin.pubDate,
+    });
+
+  return result.changes > 0;
+}
+
+export function getPin(guid: string): PinRecord | null {
+  const row = db
+    .query<PinRow, [string]>("SELECT * FROM pins WHERE guid = ?")
+    .get(guid);
+
+  return row ? mapPin(row) : null;
+}
+
+export function updateQueuedPinMedia(pin: Pin): boolean {
+  const result = db
+    .query(`
+      UPDATE pins
+      SET image_url = $imageUrl,
+          media_type = $mediaType,
+          media_items = $mediaItems,
+          source_url = COALESCE($sourceUrl, source_url)
+      WHERE guid = $guid
+        AND published = 0
+        AND status IN ('pending', 'failed')
+    `)
+    .run({
+      $guid: pin.guid,
+      $imageUrl: pin.imageUrl,
+      $mediaType: pin.mediaType,
+      $mediaItems: JSON.stringify(pin.mediaItems),
+      $sourceUrl: pin.sourceUrl ?? null,
     });
 
   return result.changes > 0;
@@ -147,7 +217,7 @@ export function claimNextPin(): PinRecord | null {
       .query<PinRow, [number, number, number]>(`
         SELECT *
         FROM pins
-        WHERE image_url != ''
+        WHERE (image_url != '' OR media_items != '[]')
           AND attempts < ?
           AND (
             status = 'pending'
