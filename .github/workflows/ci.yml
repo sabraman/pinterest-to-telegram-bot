@@ -33,7 +33,9 @@ jobs:
 
       - name: Check for leaked deployment secrets
         run: |
-          if grep -R -n -E '8421055017|AAEh2sMG2YivD0l4Mdn1uVXStUtE_MVpdc8|xfM00Y1QN4m7|WeEXT8kmPULE|u5cqisL5' \
+          BOT_TOKEN_PATTERN='TELEGRAM_BOT_TOKEN=[0-9]+:[A-Za-z0-9_-]{20,}'
+          PASSWORD_PATTERN='(VPS_ROOT_PASSWORD[[:space:]]*=|Пароль[[:space:]]*:)'
+          if grep -R -n -E "$BOT_TOKEN_PATTERN|$PASSWORD_PATTERN" \
             --exclude-dir=.git \
             --exclude-dir=node_modules \
             --exclude-dir=data \
