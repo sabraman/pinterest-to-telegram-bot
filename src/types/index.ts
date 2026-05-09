@@ -1,12 +1,36 @@
 export interface Pin {
   guid: string;
   imageUrl: string;
+  sourceUrl?: string;
   published: boolean;
-  pubDate: Date;
+  pubDate: string;
 }
 
 export interface RssEntry {
-  id: string;
-  description?: { value?: string };
-  published?: string | Date;
-} 
+  id?: string;
+  guid?: string | { "#text"?: string; text?: string };
+  link?: string;
+  description?: string | { value?: string };
+  pubDate?: string;
+  published?: string;
+}
+
+export type PinStatus = "pending" | "processing" | "done" | "failed" | "skipped";
+
+export interface PinRecord extends Pin {
+  status: PinStatus;
+  attempts: number;
+  lastError: string | null;
+  createdAt: string;
+  publishedAt: string | null;
+  lockToken: string | null;
+}
+
+export interface QueueStats {
+  total: number;
+  pending: number;
+  processing: number;
+  done: number;
+  failed: number;
+  skipped: number;
+}

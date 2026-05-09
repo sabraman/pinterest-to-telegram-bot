@@ -1,6 +1,7 @@
-import type { Bot } from "../deps.deno.ts";
+import type { Bot } from "grammy";
 import { isAdmin } from "../utils/helpers.ts";
-import * as kvService from "../services/kv.ts";
+import * as storage from "../services/storage.ts";
+import { publishNextPin } from "../jobs/publisher.ts";
 
 export function setupCommands(bot: Bot) {
   bot.command("start", async (ctx) => {
@@ -9,26 +10,35 @@ export function setupCommands(bot: Bot) {
   });
 
   bot.command("help", async (ctx) => {
-    console.log("❓ Received /help command from user:", ctx.from?.id);
+    console.log("Received /help command from user:", ctx.from?.id);
     await ctx.reply(`Available commands:
 /status - Show system status
-/force_publish - Publish next pin
+/force_publish - Publish next pin (admin only)
 /clear - Clear storage (admin only)
 /reset_published - Reset publication status (admin only)`);
   });
 
   bot.command("status", async (ctx) => {
     console.log("Received /status command from user:", ctx.from?.id);
-    const [total, unpublished] = await Promise.all([
-      kvService.countPins(),
-      kvService.countUnpublishedPins(),
-    ]);
-    const nextCron = new Date(Date.now() + 300000);
-    console.log(`Stats: Total ${total} pins, Unpublished: ${unpublished}`);
+    const stats = storage.getStats();
     await ctx.reply(`Statistics:
-Total pins: ${total}
-Unpublished: ${unpublished}
-Next check: ${nextCron.toLocaleTimeString()}`);
+Total pins: ${stats.total}
+Pending: ${stats.pending}
+Processing: ${stats.processing}
+Published: ${stats.done}
+Failed: ${stats.failed}
+Skipped: ${stats.skipped}`);
+  });
+
+  bot.command("force_publish", async (ctx) => {
+    console.log("Received /force_publish command from user:", ctx.from?.id);
+    if (!ctx.from || !isAdmin(ctx.from.id)) {
+      console.log("Access denied for user:", ctx.from?.id);
+      return ctx.reply("Access denied. Admin only command.");
+    }
+
+    const published = await publishNextPin(bot);
+    await ctx.reply(published ? "Published next pin." : "No publishable pin found.");
   });
 
   bot.command("clear", async (ctx) => {
@@ -38,8 +48,19 @@ Next check: ${nextCron.toLocaleTimeString()}`);
       return ctx.reply("Access denied. Admin only command.");
     }
     
-    const deleted = await kvService.clearStorage();
+    const deleted = storage.clearStorage();
     await ctx.reply(`Storage cleared. Removed ${deleted} pins`);
+  });
+
+  bot.command("reset_published", async (ctx) => {
+    console.log("Received /reset_published command from user:", ctx.from?.id);
+    if (!ctx.from || !isAdmin(ctx.from.id)) {
+      console.log("Access denied for user:", ctx.from?.id);
+      return ctx.reply("Access denied. Admin only command.");
+    }
+
+    const reset = storage.resetPublished();
+    await ctx.reply(`Reset ${reset} pins to pending.`);
   });
 
   // Add catch-all handler for unhandled messages
@@ -52,4 +73,4 @@ Next check: ${nextCron.toLocaleTimeString()}`);
   bot.catch((err) => {
     console.error("Error in bot handler:", err);
   });
-} 
+}

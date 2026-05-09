@@ -1,71 +1,73 @@
 # Pinterest to Telegram Bot
 
-A bot for automatic publishing of pins from Pinterest RSS feed to a Telegram channel. Built with Deno using KV storage.
+A Bun + TypeScript bot that reads a Pinterest RSS feed and publishes queued pins to a Telegram channel.
 
-## Features
+## Runtime
 
-- Automatic pin fetching from Pinterest RSS feed
-- Image publishing to Telegram channel
-- Publication history storage in Deno KV
-- Commands for bot management
+- Bun
+- grammY long polling, no Telegram webhook
+- SQLite durable queue in `data/bot.sqlite`
+- Docker Compose deployment with `restart: unless-stopped`
 
-## Setup
+## Queue Behavior
 
-1. Clone the repository:
-```bash
-git clone https://github.com/sabraman/pinterest-to-telegram-bot.git
-cd pinterest-to-telegram-bot
-```
+RSS entries are stored once by GUID. Publish jobs move through these states:
 
-2. Create `.env` file with the following variables:
+- `pending` - ready to publish
+- `processing` - claimed by the publisher worker
+- `done` - published to Telegram
+- `failed` - waiting for retry or exhausted attempts
+- `skipped` - permanently skipped because the image or Telegram request is invalid
+
+The queue survives container restarts because SQLite is mounted from `./data`.
+
+## Configuration
+
+Create `.env`:
+
 ```env
 TELEGRAM_BOT_TOKEN=your_bot_token
-TELEGRAM_CHANNEL_ID=your_channel_id
-ADMIN_ID=your_telegram_id
-PINTEREST_FEED=pinterest_url.rss
+TELEGRAM_CHANNEL_ID=-1001219339693
+ADMIN_ID=126642711
+PINTEREST_FEED=https://ru.pinterest.com/sabraman/1telegram.rss
+DATABASE_PATH=data/bot.sqlite
+RSS_POLL_SECONDS=180
+PUBLISH_POLL_SECONDS=900
+PUBLISH_RETRY_SECONDS=300
+QUEUE_LOCK_SECONDS=120
+MAX_PUBLISH_ATTEMPTS=5
+FETCH_TIMEOUT_SECONDS=30
 ```
 
-3. Configure webhook for the bot (replace YOUR_BOT_TOKEN and YOUR_DOMAIN):
+## Local Development
+
 ```bash
-curl -X POST "https://api.telegram.org/botYOUR_BOT_TOKEN/setWebhook?url=https://YOUR_DOMAIN/YOUR_BOT_TOKEN"
+bun install
+bun run typecheck
+bun run start
 ```
 
-### Deployment on Deno Deploy
+## Docker
 
-#### Preparation
-
-1. Create a new project on [Deno Deploy](https://deno.com/deploy)
-2. Configure environment variables in the project settings:
-   - `TELEGRAM_BOT_TOKEN`
-   - `TELEGRAM_CHANNEL_ID`
-   - `ADMIN_ID`
-   - `PINTEREST_FEED`
-3. Set your bot's webhook URL by opening this in your browser (replace the values in `<...>`):
-```text
-https://api.telegram.org/bot<BOT_TOKEN>/setWebhook?url=https://<PROJECT_NAME>.deno.dev/<BOT_TOKEN>
-```
-
-#### Deployment Methods
-
-##### GitHub Integration (Recommended)
-1. Push your project to a GitHub repository
-2. In your Deno Deploy project settings, set up GitHub Integration
-3. Select `src/server.ts` as the entry point
-4. Your bot will automatically deploy on every push to the repository
-
-##### Using deployctl (Advanced)
-1. Install [deployctl](https://github.com/denoland/deployctl)
-2. Create a new [access token](https://dash.deno.com/account#access-tokens)
-3. Deploy using the command:
 ```bash
-deployctl deploy --project <PROJECT_NAME> --prod --token <ACCESS_TOKEN>
+docker compose up -d --build
+docker compose logs -f bot
 ```
+
+On a VPS, make sure Docker starts after reboot:
+
+```bash
+systemctl enable --now docker
+docker compose up -d --build
+```
+
+The Compose file uses `restart: unless-stopped`, so the bot container starts again when Docker starts after a server reboot.
 
 ## Bot Commands
 
 - `/start` - Start working with the bot
 - `/help` - Show available commands
-- `/status` - Show status (total pins, unpublished pins, next check time)
-- `/force_publish` - Publish next pin
-- `/clear` - Clear KV storage
-- `/reset_published` - Reset publication status
+- `/status` - Show queue status
+- `/force_publish` - Publish the next queued pin, admin only
+- `/clear` - Clear SQLite storage, admin only
+- `/reset_published` - Reset all pins to pending, admin only

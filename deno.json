@@ -1,7 +1,0 @@
-{
-	"deploy": {
-		"exclude": ["**/node_modules"],
-		"include": [],
-		"entrypoint": "src/server.ts"
-	}
-}
