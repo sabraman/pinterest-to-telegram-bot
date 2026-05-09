@@ -63,6 +63,18 @@ docker compose up -d --build
 
 The Compose file uses `restart: unless-stopped`, so the bot container starts again when Docker starts after a server reboot.
 
+## GitHub Actions Deployment
+
+CI runs on pushes and pull requests. Production deploy runs after CI succeeds on `main`, and can also be started manually from GitHub Actions.
+
+Required repository secrets:
+
+- `VPS_HOST` - server IP or hostname
+- `VPS_USER` - SSH user, for example `root`
+- `VPS_PORT` - optional, defaults to `22`
+- `VPS_SSH_KEY` - private SSH key allowed to connect to the VPS
+- `PRODUCTION_ENV` - full production `.env` file contents
+
 ## Bot Commands
 
 - `/start` - Start working with the bot
