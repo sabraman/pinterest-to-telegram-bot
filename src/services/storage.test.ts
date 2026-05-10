@@ -21,6 +21,7 @@ const { fetchAndStorePins } = await import("../jobs/rss.ts");
 const { publishNextPin } = await import("../jobs/publisher.ts");
 const { GrammyError } = await import("grammy");
 const { extractMediaFromHtml, parseRssEntry } = await import("../utils/helpers.ts");
+const { formatQueueFinishEta } = await import("../utils/status.ts");
 const originalFetch = globalThis.fetch;
 
 function pin(guid: string) {
@@ -46,6 +47,18 @@ afterAll(() => {
   rmSync(Bun.env.DATABASE_PATH!, { force: true });
   rmSync(`${Bun.env.DATABASE_PATH}-shm`, { force: true });
   rmSync(`${Bun.env.DATABASE_PATH}-wal`, { force: true });
+});
+
+describe("status formatting", () => {
+  test("shows absolute and relative queue finish ETA", () => {
+    expect(formatQueueFinishEta(3, 900, new Date("2026-05-10T00:00:00Z"))).toBe(
+      "2026-05-10, 03:45 MSK (45m from now)",
+    );
+  });
+
+  test("shows no pending pins when queue is empty", () => {
+    expect(formatQueueFinishEta(0, 900, new Date("2026-05-10T00:00:00Z"))).toBe("No pending pins");
+  });
 });
 
 describe("SQLite queue storage", () => {

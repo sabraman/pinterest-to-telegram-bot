@@ -2,6 +2,8 @@ import type { Bot } from "grammy";
 import { isAdmin } from "../utils/helpers.ts";
 import * as storage from "../services/storage.ts";
 import { publishNextPin } from "../jobs/publisher.ts";
+import { config } from "../config/env.ts";
+import { formatQueueFinishEta } from "../utils/status.ts";
 
 export function setupCommands(bot: Bot) {
   bot.command("start", async (ctx) => {
@@ -21,13 +23,15 @@ export function setupCommands(bot: Bot) {
   bot.command("status", async (ctx) => {
     console.log("Received /status command from user:", ctx.from?.id);
     const stats = storage.getStats();
+    const queueFinishEta = formatQueueFinishEta(stats.pending, config.publishPollSeconds);
     await ctx.reply(`Statistics:
 Total pins: ${stats.total}
 Pending: ${stats.pending}
 Processing: ${stats.processing}
 Published: ${stats.done}
 Failed: ${stats.failed}
-Skipped: ${stats.skipped}`);
+Skipped: ${stats.skipped}
+Last pending pin ETA: ${queueFinishEta}`);
   });
 
   bot.command("force_publish", async (ctx) => {
