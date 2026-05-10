@@ -319,6 +319,42 @@ describe("RSS ingestion", () => {
       { type: "photo", url: "https://i.pinimg.com/originals/example.jpg" },
     ]);
   });
+
+  test("ignores Pinterest tracking gifs from non-media hosts", () => {
+    expect(extractMediaFromHtml(`
+      https://api-pinterest-com-eip-akadns-net.pinterest.com/_/_/r22.gif
+      https://pinimg-com-eip-akadns-net.pinimg.com/_/_/r21.gif
+      https://www-pinterest-com-edgekey-net.pinterest.com/_/_/r20.gif
+    `)).toEqual([]);
+  });
+
+  test("does not save short pin pages that only expose tracking gifs", async () => {
+    globalThis.fetch = (async (url: URL | RequestInfo) => {
+      if (String(url).includes("feed.rss")) {
+        return new Response(`
+          <rss>
+            <channel>
+              <item>
+                <guid>https://ru.pinterest.com/pin/random-short/</guid>
+                <link>https://ru.pinterest.com/pin/random-short/</link>
+                <description>No RSS media here</description>
+              </item>
+            </channel>
+          </rss>
+        `, { status: 200 });
+      }
+
+      return new Response(`
+        <html>
+          https:\\/\\/api-pinterest-com-eip-akadns-net.pinterest.com\\/_\\/_\\/r22.gif
+          https:\\/\\/pinimg-com-eip-akadns-net.pinimg.com\\/_\\/_\\/r21.gif
+        </html>
+      `, { status: 200 });
+    }) as unknown as typeof fetch;
+
+    await expect(fetchAndStorePins()).resolves.toBe(0);
+    expect(storage.getStats().total).toBe(0);
+  });
 });
 
 describe("publisher", () => {

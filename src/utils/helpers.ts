@@ -85,10 +85,11 @@ function isLikelyContentMediaUrl(url: string): boolean {
     const hostname = parsed.hostname.toLowerCase();
     const pathname = parsed.pathname.toLowerCase();
 
-    if (hostname === "s.pinimg.com") return false;
+    if (hostname !== "i.pinimg.com" && hostname !== "v.pinimg.com") return false;
     if (
       pathname.includes("/webapp/")
       || pathname.includes("/upload/")
+      || pathname.includes("/_/_/")
       || pathname.includes("_rs/")
       || pathname.includes("favicon")
       || pathname.includes("logo")
