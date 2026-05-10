@@ -1,7 +1,7 @@
 import { Bot, GrammyError } from "grammy";
 import { config } from "../config/env.ts";
 import * as storage from "../services/storage.ts";
-import { delay } from "../utils/helpers.ts";
+import { delay, isContentMediaUrl } from "../utils/helpers.ts";
 import type { MediaItem } from "../types/index.ts";
 
 function describeError(error: unknown): string {
@@ -106,6 +106,9 @@ export async function publishNextPin(bot: Bot): Promise<boolean> {
   try {
     const mediaItems = mediaForSinglePublishAttempt(pin.mediaItems);
     for (const item of mediaItems) {
+      if (!isContentMediaUrl(item.url)) {
+        throw new Error(`Invalid Pinterest media URL: ${item.url}`);
+      }
       await assertMediaAvailable(item.url);
     }
     await sendMedia(bot, mediaItems);
@@ -125,7 +128,7 @@ export async function publishNextPin(bot: Bot): Promise<boolean> {
       return false;
     }
 
-    if (message.includes("HTTP 404") || message.includes("HTTP 403")) {
+    if (message.includes("HTTP 404") || message.includes("HTTP 403") || message.includes("Invalid Pinterest media URL")) {
       console.error(`Skipping unavailable media ${pin.guid}: ${message}`);
       if (pin.lockToken) storage.markSkipped(pin.guid, pin.lockToken, message);
       return false;

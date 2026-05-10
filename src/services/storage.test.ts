@@ -20,12 +20,12 @@ const storage = await import("./storage.ts");
 const { fetchAndStorePins } = await import("../jobs/rss.ts");
 const { publishNextPin } = await import("../jobs/publisher.ts");
 const { GrammyError } = await import("grammy");
-const { extractMediaFromHtml, parseRssEntry } = await import("../utils/helpers.ts");
+const { extractMediaFromHtml, isContentMediaUrl, parseRssEntry } = await import("../utils/helpers.ts");
 const { formatQueueFinishEta, formatRssParsedMessage } = await import("../utils/status.ts");
 const originalFetch = globalThis.fetch;
 
 function pin(guid: string) {
-  const imageUrl = `https://example.test/${guid}.jpg`;
+  const imageUrl = `https://i.pinimg.com/originals/${guid}.jpg`;
   return {
     guid,
     imageUrl,
@@ -321,6 +321,8 @@ describe("RSS ingestion", () => {
   });
 
   test("ignores Pinterest tracking gifs from non-media hosts", () => {
+    expect(isContentMediaUrl("https://api-pinterest-com-eip-akadns-net.pinterest.com/_/_/r22.gif")).toBe(false);
+    expect(isContentMediaUrl("https://i.pinimg.com/originals/aa/bb/cc/example.gif")).toBe(true);
     expect(extractMediaFromHtml(`
       https://api-pinterest-com-eip-akadns-net.pinterest.com/_/_/r22.gif
       https://pinimg-com-eip-akadns-net.pinimg.com/_/_/r21.gif
@@ -410,6 +412,30 @@ describe("publisher", () => {
       },
     }) as never)).resolves.toBe(false);
 
+    expect(storage.getStats().skipped).toBe(1);
+  });
+
+  test("skips invalid tracking gif media before sending", async () => {
+    storage.savePin({
+      ...pin("tracking"),
+      imageUrl: "https://api-pinterest-com-eip-akadns-net.pinterest.com/_/_/r22.gif",
+      mediaType: "animation",
+      mediaItems: [{ type: "animation", url: "https://api-pinterest-com-eip-akadns-net.pinterest.com/_/_/r22.gif" }],
+    });
+
+    let fetches = 0;
+    let sends = 0;
+    globalThis.fetch = (async () => {
+      fetches++;
+      return new Response("", { status: 200 });
+    }) as unknown as typeof fetch;
+
+    await expect(publishNextPin(bot({
+      sendAnimation: async () => { sends++; },
+    }) as never)).resolves.toBe(false);
+
+    expect(fetches).toBe(0);
+    expect(sends).toBe(0);
     expect(storage.getStats().skipped).toBe(1);
   });
 

@@ -79,7 +79,7 @@ export function uniqueMediaItems(items: MediaItem[]): MediaItem[] {
   return [...byIdentity.values()];
 }
 
-function isLikelyContentMediaUrl(url: string): boolean {
+export function isContentMediaUrl(url: string): boolean {
   try {
     const parsed = new URL(url);
     const hostname = parsed.hostname.toLowerCase();
@@ -112,7 +112,7 @@ export function extractMediaFromHtml(html: string): MediaItem[] {
     ...decoded.matchAll(/https?:\/\/[^"'\\<>\s]+?\.(?:jpe?g|png|webp|gif|mp4|mov|webm)(?:\?[^"'\\<>\s]*)?/gi),
   ].map((match) => match[0]);
 
-  return uniqueMediaItems(urls.filter(isLikelyContentMediaUrl).map((url) => {
+  return uniqueMediaItems(urls.filter(isContentMediaUrl).map((url) => {
     const type = mediaTypeFromUrl(url);
     return {
       type,
