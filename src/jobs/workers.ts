@@ -1,5 +1,7 @@
 import type { Bot } from "grammy";
 import { config } from "../config/env.ts";
+import * as storage from "../services/storage.ts";
+import { formatRssParsedMessage } from "../utils/status.ts";
 import { fetchAndStorePins } from "./rss.ts";
 import { publishNextPin } from "./publisher.ts";
 
@@ -60,7 +62,12 @@ export function startWorkers(bot: Bot): void {
   startLoop(bot, "RSS worker", config.rssPollSeconds, async () => {
     const saved = await fetchAndStorePins();
     if (saved > 0) {
-      await bot.api.sendMessage(config.adminId, `RSS parsed. Saved ${saved} new pins.`, {
+      const stats = storage.getStats();
+      await bot.api.sendMessage(config.adminId, formatRssParsedMessage(
+        saved,
+        stats.pending,
+        config.publishPollSeconds,
+      ), {
         disable_notification: true,
       }).catch(console.error);
     }

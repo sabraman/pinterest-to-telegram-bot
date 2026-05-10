@@ -35,3 +35,14 @@ export function formatQueueFinishEta(
 
   return `${moscowFormatter.format(finishAt)} MSK (${formatDuration(secondsUntilLastPin)} from now)`;
 }
+
+export function formatRssParsedMessage(
+  savedPins: number,
+  pendingPins: number,
+  publishPollSeconds: number,
+): string {
+  return [
+    `RSS parsed. Saved ${savedPins} new pins.`,
+    `Last pending pin ETA: ${formatQueueFinishEta(pendingPins, publishPollSeconds)}`,
+  ].join("\n");
+}

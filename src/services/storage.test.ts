@@ -21,7 +21,7 @@ const { fetchAndStorePins } = await import("../jobs/rss.ts");
 const { publishNextPin } = await import("../jobs/publisher.ts");
 const { GrammyError } = await import("grammy");
 const { extractMediaFromHtml, parseRssEntry } = await import("../utils/helpers.ts");
-const { formatQueueFinishEta } = await import("../utils/status.ts");
+const { formatQueueFinishEta, formatRssParsedMessage } = await import("../utils/status.ts");
 const originalFetch = globalThis.fetch;
 
 function pin(guid: string) {
@@ -58,6 +58,12 @@ describe("status formatting", () => {
 
   test("shows no pending pins when queue is empty", () => {
     expect(formatQueueFinishEta(0, 900, new Date("2026-05-10T00:00:00Z"))).toBe("No pending pins");
+  });
+
+  test("formats RSS notification with queue finish ETA", () => {
+    expect(formatRssParsedMessage(7, 10, 900)).toContain(
+      "RSS parsed. Saved 7 new pins.\nLast pending pin ETA:",
+    );
   });
 });
 
