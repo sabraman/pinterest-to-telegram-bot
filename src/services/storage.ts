@@ -139,6 +139,20 @@ export function getPin(guid: string): PinRecord | null {
   return row ? mapPin(row) : null;
 }
 
+export function hasMediaUrl(mediaUrl: string, excludeGuid?: string): boolean {
+  const row = db
+    .query<{ found: number }, [string, string]>(`
+      SELECT 1 AS found
+      FROM pins
+      WHERE image_url = ?
+        AND guid != ?
+      LIMIT 1
+    `)
+    .get(mediaUrl, excludeGuid ?? "");
+
+  return Boolean(row);
+}
+
 export function updateQueuedPinMedia(pin: Pin): boolean {
   const result = db
     .query(`

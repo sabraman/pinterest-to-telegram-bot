@@ -23,6 +23,13 @@ function entriesFromFeed(xml: string): RssEntry[] {
   return Array.isArray(entries) ? entries : [entries];
 }
 
+function entryDate(entry: RssEntry): Date | null {
+  const raw = typeof entry.published === "string" ? entry.published : entry.pubDate;
+  const date = raw ? new Date(raw) : null;
+
+  return date && !Number.isNaN(date.getTime()) ? date : null;
+}
+
 async function resolvePinPageMedia(pinUrl: string | undefined) {
   if (!pinUrl) return [];
 
@@ -62,12 +69,18 @@ export async function fetchAndStorePins(): Promise<number> {
 
   for (const entry of entries) {
     const pin = parseRssEntry(entry);
+    const hasRssMedia = pin.mediaItems.length > 0;
     const existingPin = pin.guid ? storage.getPin(pin.guid) : null;
     const shouldEnrich = !existingPin
       || (
         (existingPin.status === "pending" || existingPin.status === "failed")
         && existingPin.mediaType === "photo"
       );
+
+    if (!hasRssMedia && !entryDate(entry)) {
+      skipped++;
+      continue;
+    }
 
     if (pin.guid && shouldEnrich) {
       try {
@@ -98,6 +111,11 @@ export async function fetchAndStorePins(): Promise<number> {
 
     if (existingPin) {
       storage.updateQueuedPinMedia(pin);
+      continue;
+    }
+
+    if (storage.hasMediaUrl(pin.imageUrl, pin.guid)) {
+      skipped++;
       continue;
     }
 

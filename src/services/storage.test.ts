@@ -224,6 +224,7 @@ describe("RSS ingestion", () => {
               <item>
                 <guid>empty-media-pin</guid>
                 <link>https://ru.pinterest.com/pin/video/</link>
+                <pubDate>Sat, 23 May 2026 05:32:51 GMT</pubDate>
                 <description>&lt;img src=&quot;&quot;&gt;</description>
               </item>
             </channel>
@@ -331,6 +332,7 @@ describe("RSS ingestion", () => {
   });
 
   test("does not save short pin pages that only expose tracking gifs", async () => {
+    let pinPageFetches = 0;
     globalThis.fetch = (async (url: URL | RequestInfo) => {
       if (String(url).includes("feed.rss")) {
         return new Response(`
@@ -346,6 +348,7 @@ describe("RSS ingestion", () => {
         `, { status: 200 });
       }
 
+      pinPageFetches++;
       return new Response(`
         <html>
           https:\\/\\/api-pinterest-com-eip-akadns-net.pinterest.com\\/_\\/_\\/r22.gif
@@ -355,7 +358,38 @@ describe("RSS ingestion", () => {
     }) as unknown as typeof fetch;
 
     await expect(fetchAndStorePins()).resolves.toBe(0);
+    expect(pinPageFetches).toBe(0);
     expect(storage.getStats().total).toBe(0);
+  });
+
+  test("deduplicates new pins by media url even when guid changes", async () => {
+    globalThis.fetch = (async (url: URL | RequestInfo) => {
+      if (String(url).includes("feed.rss")) {
+        return new Response(`
+          <rss>
+            <channel>
+              <item>
+                <guid>https://ru.pinterest.com/pin/first/</guid>
+                <link>https://ru.pinterest.com/pin/first/</link>
+                <pubDate>Sat, 23 May 2026 05:32:51 GMT</pubDate>
+                <description>&lt;img src=&quot;https://i.pinimg.com/236x/d5/3b/01/d53b014d86a6b6761bf649a0ed813c2b.png&quot;&gt;</description>
+              </item>
+              <item>
+                <guid>https://ru.pinterest.com/pin/second/</guid>
+                <link>https://ru.pinterest.com/pin/second/</link>
+                <pubDate>Sat, 23 May 2026 05:33:51 GMT</pubDate>
+                <description>&lt;img src=&quot;https://i.pinimg.com/236x/d5/3b/01/d53b014d86a6b6761bf649a0ed813c2b.png&quot;&gt;</description>
+              </item>
+            </channel>
+          </rss>
+        `, { status: 200 });
+      }
+
+      return new Response("<html></html>", { status: 200 });
+    }) as unknown as typeof fetch;
+
+    await expect(fetchAndStorePins()).resolves.toBe(1);
+    expect(storage.getStats().total).toBe(1);
   });
 });
 
