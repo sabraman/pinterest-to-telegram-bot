@@ -331,6 +331,14 @@ describe("RSS ingestion", () => {
     `)).toEqual([]);
   });
 
+  test("ignores Pinterest placeholder media", () => {
+    expect(isContentMediaUrl("https://i.pinimg.com/originals/d5/3b/01/d53b014d86a6b6761bf649a0ed813c2b.png")).toBe(false);
+    expect(extractMediaFromHtml(`
+      https://i.pinimg.com/originals/d5/3b/01/d53b014d86a6b6761bf649a0ed813c2b.png
+      https://i.pinimg.com/236x/d5/3b/01/d53b014d86a6b6761bf649a0ed813c2b.png
+    `)).toEqual([]);
+  });
+
   test("does not save short pin pages that only expose tracking gifs", async () => {
     let pinPageFetches = 0;
     globalThis.fetch = (async (url: URL | RequestInfo) => {
@@ -372,13 +380,13 @@ describe("RSS ingestion", () => {
                 <guid>https://ru.pinterest.com/pin/first/</guid>
                 <link>https://ru.pinterest.com/pin/first/</link>
                 <pubDate>Sat, 23 May 2026 05:32:51 GMT</pubDate>
-                <description>&lt;img src=&quot;https://i.pinimg.com/236x/d5/3b/01/d53b014d86a6b6761bf649a0ed813c2b.png&quot;&gt;</description>
+                <description>&lt;img src=&quot;https://i.pinimg.com/236x/aa/bb/cc/aabbccddeeff00112233445566778899.jpg&quot;&gt;</description>
               </item>
               <item>
                 <guid>https://ru.pinterest.com/pin/second/</guid>
                 <link>https://ru.pinterest.com/pin/second/</link>
                 <pubDate>Sat, 23 May 2026 05:33:51 GMT</pubDate>
-                <description>&lt;img src=&quot;https://i.pinimg.com/236x/d5/3b/01/d53b014d86a6b6761bf649a0ed813c2b.png&quot;&gt;</description>
+                <description>&lt;img src=&quot;https://i.pinimg.com/236x/aa/bb/cc/aabbccddeeff00112233445566778899.jpg&quot;&gt;</description>
               </item>
             </channel>
           </rss>
@@ -466,6 +474,29 @@ describe("publisher", () => {
 
     await expect(publishNextPin(bot({
       sendAnimation: async () => { sends++; },
+    }) as never)).resolves.toBe(false);
+
+    expect(fetches).toBe(0);
+    expect(sends).toBe(0);
+    expect(storage.getStats().skipped).toBe(1);
+  });
+
+  test("skips Pinterest placeholder media before sending", async () => {
+    storage.savePin({
+      ...pin("bad"),
+      imageUrl: "https://i.pinimg.com/originals/d5/3b/01/d53b014d86a6b6761bf649a0ed813c2b.png",
+      mediaItems: [{ type: "photo", url: "https://i.pinimg.com/originals/d5/3b/01/d53b014d86a6b6761bf649a0ed813c2b.png" }],
+    });
+
+    let fetches = 0;
+    let sends = 0;
+    globalThis.fetch = (async () => {
+      fetches++;
+      return new Response("", { status: 200 });
+    }) as unknown as typeof fetch;
+
+    await expect(publishNextPin(bot({
+      sendPhoto: async () => { sends++; },
     }) as never)).resolves.toBe(false);
 
     expect(fetches).toBe(0);

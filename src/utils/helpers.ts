@@ -32,6 +32,12 @@ function normalizePinterestImage(url: string): string {
     .replace(/\/\d+x\d*\//, "/originals/");
 }
 
+const blockedPinterestMediaIds = new Set([
+  // Pinterest's generic gradient placeholder. It appeared in pin pages as real
+  // media and was published repeatedly before URL-level dedupe was added.
+  "d53b014d86a6b6761bf649a0ed813c2b",
+]);
+
 export function mediaTypeFromUrl(url: string): MediaType {
   const cleanUrl = url.split("?")[0]?.toLowerCase() ?? url.toLowerCase();
 
@@ -94,6 +100,10 @@ export function isContentMediaUrl(url: string): boolean {
       || pathname.includes("favicon")
       || pathname.includes("logo")
     ) {
+      return false;
+    }
+
+    if (blockedPinterestMediaIds.has(mediaIdentity({ type: mediaTypeFromUrl(url), url }).toLowerCase())) {
       return false;
     }
 
