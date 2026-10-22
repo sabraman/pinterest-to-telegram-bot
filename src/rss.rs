@@ -52,8 +52,9 @@ pub fn parse_rss_xml(xml: &str) -> Vec<Pin> {
                     }
                 }
             }
-            Event::End(e) => {
-                let name = String::from_utf8_lossy(e.name().as_ref());
+            Event::End(ref e) => {
+                let qname = e.name();
+                let name = String::from_utf8_lossy(qname.as_ref());
                 if name.eq_ignore_ascii_case("item") || name.eq_ignore_ascii_case("entry") {
                     in_item = false;
                     let decoded_desc = decode_html(&description);
@@ -157,7 +158,7 @@ pub fn fetch_and_store_pins(config: &Config, storage: &Storage) -> Result<usize,
                         .collect();
 
                     let mut combined = matching_resolved;
-                    combined.extend(pin.media_items);
+                    combined.extend(pin.media_items.clone());
                     let enriched = unique_media_items(combined);
                     if let Some(primary) = enriched.first() {
                         pin.media_type = primary.media_type;

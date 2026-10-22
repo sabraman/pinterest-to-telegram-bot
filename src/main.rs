@@ -8,7 +8,7 @@ mod telegram;
 mod types;
 
 use config::Config;
-use frankenstein::Api;
+use frankenstein::client_ureq::Bot;
 use publisher::publish_next_pin;
 use rss::fetch_and_store_pins;
 use status::format_rss_parsed_message;
@@ -40,7 +40,7 @@ fn main() {
         }
     };
 
-    let api = Arc::new(Api::new(&config.telegram_bot_token));
+    let api = Arc::new(Bot::new(&config.telegram_bot_token));
 
     let (tx_worker, rx_worker) = channel::<WorkerSignal>();
     let running = Arc::new(AtomicBool::new(true));

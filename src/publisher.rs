@@ -2,10 +2,12 @@ use crate::config::Config;
 use crate::scraper::is_content_media_url;
 use crate::storage::Storage;
 use crate::types::{MediaItem, MediaType};
-use frankenstein::{
-    Api, InputMedia, InputMediaPhoto, InputMediaVideo, SendAnimationParams, SendMediaGroupParams,
-    SendPhotoParams, SendVideoParams, TelegramApi,
+use frankenstein::client_ureq::Bot;
+use frankenstein::methods::{
+    SendAnimationParams, SendMediaGroupParams, SendPhotoParams, SendVideoParams,
 };
+use frankenstein::types::{InputMedia, InputMediaPhoto, InputMediaVideo};
+use frankenstein::TelegramApi;
 use std::thread::sleep;
 use std::time::Duration;
 
@@ -36,7 +38,7 @@ pub fn assert_media_available(url: &str, timeout_secs: u64) -> Result<(), String
     }
 }
 
-pub fn send_media(api: &Api, channel_id: &str, media_items: &[MediaItem]) -> Result<(), String> {
+pub fn send_media(api: &Bot, channel_id: &str, media_items: &[MediaItem]) -> Result<(), String> {
     if media_items.is_empty() {
         return Err("Pin has no media items".to_string());
     }
@@ -95,7 +97,7 @@ pub fn send_media(api: &Api, channel_id: &str, media_items: &[MediaItem]) -> Res
     Ok(())
 }
 
-pub fn publish_next_pin(api: &Api, config: &Config, storage: &Storage) -> Result<bool, String> {
+pub fn publish_next_pin(api: &Bot, config: &Config, storage: &Storage) -> Result<bool, String> {
     let pin_record = match storage.claim_next_pin() {
         Ok(Some(record)) => record,
         Ok(None) => {

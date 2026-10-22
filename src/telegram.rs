@@ -2,9 +2,10 @@ use crate::config::Config;
 use crate::status::format_queue_finish_eta;
 use crate::storage::Storage;
 use chrono::Utc;
-use frankenstein::{
-    Api, GetUpdatesParams, Message, SendMessageParams, TelegramApi, UpdateContent,
-};
+use frankenstein::client_ureq::Bot;
+use frankenstein::methods::{GetUpdatesParams, SendMessageParams};
+use frankenstein::types::{Message, UpdateContent};
+use frankenstein::TelegramApi;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
@@ -16,7 +17,7 @@ pub enum WorkerSignal {
     ForcePublish,
 }
 
-pub fn notify_admin(api: &Api, admin_id: i64, text: &str) {
+pub fn notify_admin(api: &Bot, admin_id: i64, text: &str) {
     let params = SendMessageParams::builder()
         .chat_id(admin_id)
         .text(text)
@@ -26,7 +27,7 @@ pub fn notify_admin(api: &Api, admin_id: i64, text: &str) {
 }
 
 pub fn handle_message(
-    api: &Api,
+    api: &Bot,
     config: &Config,
     storage: &Storage,
     tx_worker: &Sender<WorkerSignal>,
@@ -93,7 +94,7 @@ pub fn handle_message(
 }
 
 pub fn run_telegram_poller(
-    api: Arc<Api>,
+    api: Arc<Bot>,
     config: Arc<Config>,
     storage: Storage,
     tx_worker: Sender<WorkerSignal>,
