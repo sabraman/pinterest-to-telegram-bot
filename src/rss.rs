@@ -16,12 +16,30 @@ pub fn normalize_pub_date(raw: &str) -> String {
     if trimmed.is_empty() {
         return chrono::Utc::now().to_rfc3339();
     }
+    // 1. Strict RFC 2822
     if let Ok(dt) = chrono::DateTime::parse_from_rfc2822(trimmed) {
         return dt.with_timezone(&chrono::Utc).to_rfc3339();
     }
+    // 2. Strict RFC 3339 / ISO 8601
     if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(trimmed) {
         return dt.with_timezone(&chrono::Utc).to_rfc3339();
     }
+    // 3. Permissive RFC 2822 (in case day-of-week was mismatched or omitted)
+    let after_comma = if let Some((_, rest)) = trimmed.split_once(',') {
+        rest.trim()
+    } else {
+        trimmed
+    };
+    if let Ok(dt) = chrono::DateTime::parse_from_str(after_comma, "%d %b %Y %H:%M:%S %z") {
+        return dt.with_timezone(&chrono::Utc).to_rfc3339();
+    }
+    if let Ok(dt) = chrono::DateTime::parse_from_str(after_comma, "%d %b %Y %H:%M:%S GMT") {
+        return dt.with_timezone(&chrono::Utc).to_rfc3339();
+    }
+    if let Ok(dt) = chrono::DateTime::parse_from_str(after_comma, "%d %b %Y %H:%M:%S UTC") {
+        return dt.with_timezone(&chrono::Utc).to_rfc3339();
+    }
+
     chrono::Utc::now().to_rfc3339()
 }
 
@@ -232,7 +250,7 @@ mod tests {
                     <guid>https://www.pinterest.com/pin/12345/</guid>
                     <link>https://www.pinterest.com/pin/12345/</link>
                     <description>&lt;img src="https://i.pinimg.com/originals/12/34/56/123456789.jpg" /&gt;</description>
-                    <pubDate>Mon, 01 Jan 2026 00:00:00 +0000</pubDate>
+                    <pubDate>Thu, 01 Jan 2026 00:00:00 +0000</pubDate>
                 </item>
             </channel>
         </rss>"#;
@@ -267,10 +285,17 @@ mod tests {
 
     #[test]
     fn test_normalize_pub_date() {
+        // Standard RFC 2822
+        assert_eq!(
+            normalize_pub_date("Thu, 01 Jan 2026 00:00:00 +0000"),
+            "2026-01-01T00:00:00+00:00"
+        );
+        // Permissive RFC 2822 with mismatched weekday
         assert_eq!(
             normalize_pub_date("Mon, 01 Jan 2026 00:00:00 +0000"),
             "2026-01-01T00:00:00+00:00"
         );
+        // Standard RFC 3339
         assert_eq!(
             normalize_pub_date("2026-01-01T00:00:00Z"),
             "2026-01-01T00:00:00+00:00"
