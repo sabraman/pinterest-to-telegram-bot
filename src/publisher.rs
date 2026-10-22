@@ -3,7 +3,7 @@ use crate::scraper::is_content_media_url;
 use crate::storage::Storage;
 use crate::types::{MediaItem, MediaType};
 use frankenstein::client_ureq::Bot;
-use frankenstein::input_media::{InputMedia, InputMediaPhoto, InputMediaVideo};
+use frankenstein::input_media::{InputMediaPhoto, InputMediaVideo, MediaGroupInputMedia};
 use frankenstein::methods::{
     SendAnimationParams, SendMediaGroupParams, SendPhotoParams, SendVideoParams,
 };
@@ -49,14 +49,20 @@ pub fn send_media(api: &Bot, channel_id: &str, media_items: &[MediaItem]) -> Res
             .take(10)
             .map(|item| {
                 if item.media_type == MediaType::Video {
-                    InputMediaVideo::builder().media(item.url.clone()).build()
+                    MediaGroupInputMedia::Video(InputMediaVideo::builder().media(item.url.clone()).build())
                 } else {
-                    InputMediaPhoto::builder().media(item.url.clone()).build()
+                    MediaGroupInputMedia::Photo(InputMediaPhoto::builder().media(item.url.clone()).build())
                 }
             })
             .collect::<Vec<_>>();
 
-        let () = group;
+        let params = SendMediaGroupParams::builder()
+            .chat_id(channel_id.to_string())
+            .media(group)
+            .build();
+
+        api.send_media_group(&params)
+            .map_err(|e| format!("Failed to send media group: {:?}", e))?;
         return Ok(());
     }
 

@@ -115,7 +115,7 @@ pub fn run_telegram_poller(
             Ok(response) => {
                 for update in response.result {
                     offset = Some((update.update_id as i64) + 1);
-                    let () = update.content;
+                    let (a,) = update.content;
                 }
             }
             Err(err) => {
