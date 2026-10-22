@@ -44,25 +44,19 @@ pub fn send_media(api: &Bot, channel_id: &str, media_items: &[MediaItem]) -> Res
     }
 
     if media_items.len() > 1 && media_items.iter().all(|i| i.media_type == MediaType::Photo || i.media_type == MediaType::Video) {
-        let group: Vec<InputMedia> = media_items
+        let group = media_items
             .iter()
             .take(10)
             .map(|item| {
                 if item.media_type == MediaType::Video {
-                    InputMedia::Video(InputMediaVideo::builder().media(item.url.clone()).build())
+                    InputMediaVideo::builder().media(item.url.clone()).build()
                 } else {
-                    InputMedia::Photo(InputMediaPhoto::builder().media(item.url.clone()).build())
+                    InputMediaPhoto::builder().media(item.url.clone()).build()
                 }
             })
-            .collect();
+            .collect::<Vec<_>>();
 
-        let params = SendMediaGroupParams::builder()
-            .chat_id(channel_id.to_string())
-            .media(group)
-            .build();
-
-        api.send_media_group(&params)
-            .map_err(|e| format!("Failed to send media group: {:?}", e))?;
+        let () = group;
         return Ok(());
     }
 

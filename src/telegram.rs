@@ -115,9 +115,7 @@ pub fn run_telegram_poller(
             Ok(response) => {
                 for update in response.result {
                     offset = Some((update.update_id as i64) + 1);
-                    if let Some(ref msg) = update.message {
-                        handle_message(&api, &config, &storage, &tx_worker, msg);
-                    }
+                    let () = update.content;
                 }
             }
             Err(err) => {
