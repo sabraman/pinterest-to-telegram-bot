@@ -1,0 +1,24 @@
+[package]
+name = "pinterest-to-telegram-bot"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+frankenstein = { version = "0.52", default-features = false, features = ["client-ureq"] }
+ureq = { version = "2.10", default-features = false, features = ["tls", "gzip", "json"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+quick-xml = "0.37"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+chrono = { version = "0.4", features = ["serde"] }
+chrono-tz = "0.10"
+uuid = { version = "1.10", features = ["v4"] }
+ctrlc = { version = "3.4", features = ["termination"] }
+regex = "1.11"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
