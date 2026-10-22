@@ -1,14 +1,16 @@
-# Pinterest to Telegram Bot
+# Pinterest to Telegram Bot (Frankenstein Rust Edition)
 
-A Bun + TypeScript bot that reads a Pinterest RSS feed and publishes queued pins to a Telegram channel.
+A high-performance, ultra-low RAM Rust bot that reads a Pinterest RSS feed and publishes queued pins to a Telegram channel using the [`frankenstein`](https://crates.io/crates/frankenstein) crate.
 
-## Runtime
+## Runtime & Performance
 
-- Bun
-- grammY long polling, no Telegram webhook
-- SQLite durable queue in `data/bot.sqlite`
-- Photo, video, GIF/animation, and carousel publishing
-- Docker Compose deployment with `restart: unless-stopped`
+- **Language:** Rust (2021 edition)
+- **Telegram Client:** `frankenstein` (synchronous `client-ureq`)
+- **Memory Footprint:** **~3–5 MB RSS** (vs ~60–80 MB for Bun/Node)
+- **Concurrency:** Dual-threaded synchronous architecture with capped 512 KB thread stacks (no Tokio/async runtime overhead)
+- **Storage:** SQLite durable queue in `data/bot.sqlite` (compatible with legacy database)
+- **Media Support:** Photo, video, GIF/animation, and carousel (album) publishing
+- **Deployment:** Multi-stage Docker Alpine build with `restart: unless-stopped`
 
 ## Queue Behavior
 
@@ -41,15 +43,17 @@ FETCH_TIMEOUT_SECONDS=30
 PUBLISH_SEND_DELAY_MS=1000
 ```
 
-## Local Development
+## Local Development (Cargo)
 
 ```bash
-bun install
-bun run typecheck
-bun run start
+# Run unit tests
+cargo test
+
+# Run bot locally
+cargo run
 ```
 
-## Docker
+## Docker Deployment
 
 ```bash
 docker compose up -d --build
@@ -63,25 +67,13 @@ systemctl enable --now docker
 docker compose up -d --build
 ```
 
-The Compose file uses `restart: unless-stopped`, so the bot container starts again when Docker starts after a server reboot.
-
-## GitHub Actions Deployment
-
-CI runs on pushes and pull requests. Production deploy runs after CI succeeds on `main`, and can also be started manually from GitHub Actions.
-
-Required repository secrets:
-
-- `VPS_HOST` - server IP or hostname
-- `VPS_USER` - SSH user, for example `root`
-- `VPS_PORT` - optional, defaults to `22`
-- `VPS_SSH_KEY` - private SSH key allowed to connect to the VPS
-- `PRODUCTION_ENV` - full production `.env` file contents
+The Compose file uses `restart: unless-stopped`, so the bot container automatically recovers when Docker starts after a server reboot.
 
 ## Bot Commands
 
 - `/start` - Start working with the bot
 - `/help` - Show available commands
-- `/status` - Show queue status
-- `/force_publish` - Publish the next queued pin, admin only
-- `/clear` - Clear SQLite storage, admin only
-- `/reset_published` - Reset all pins to pending, admin only
+- `/status` - Show queue statistics and queue completion ETA in Moscow Standard Time (MSK)
+- `/force_publish` - Publish the next queued pin immediately (admin only)
+- `/clear` - Clear SQLite storage (admin only)
+- `/reset_published` - Reset all pins to pending (admin only)
