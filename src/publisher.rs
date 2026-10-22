@@ -3,10 +3,10 @@ use crate::scraper::is_content_media_url;
 use crate::storage::Storage;
 use crate::types::{MediaItem, MediaType};
 use frankenstein::client_ureq::Bot;
+use frankenstein::input_media::{InputMedia, InputMediaPhoto, InputMediaVideo};
 use frankenstein::methods::{
     SendAnimationParams, SendMediaGroupParams, SendPhotoParams, SendVideoParams,
 };
-use frankenstein::types::{InputMedia, InputMediaPhoto, InputMediaVideo};
 use frankenstein::TelegramApi;
 use std::thread::sleep;
 use std::time::Duration;

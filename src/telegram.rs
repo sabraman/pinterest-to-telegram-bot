@@ -4,7 +4,7 @@ use crate::storage::Storage;
 use chrono::Utc;
 use frankenstein::client_ureq::Bot;
 use frankenstein::methods::{GetUpdatesParams, SendMessageParams};
-use frankenstein::types::{Message, UpdateContent};
+use frankenstein::types::Message;
 use frankenstein::TelegramApi;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
@@ -103,20 +103,19 @@ pub fn run_telegram_poller(
     println!("Starting Telegram long-polling thread...");
     notify_admin(&api, config.admin_id, "Bot has been restarted");
 
-    let mut offset: Option<u64> = None;
+    let mut offset: Option<i64> = None;
 
     while running.load(Ordering::SeqCst) {
-        let mut builder = GetUpdatesParams::builder().timeout(20u32);
-        if let Some(off) = offset {
-            builder = builder.offset(off);
-        }
-        let params = builder.build();
+        let params = match offset {
+            Some(off) => GetUpdatesParams::builder().timeout(20u32).offset(off).build(),
+            None => GetUpdatesParams::builder().timeout(20u32).build(),
+        };
 
         match api.get_updates(&params) {
             Ok(response) => {
                 for update in response.result {
-                    offset = Some(update.update_id + 1);
-                    if let UpdateContent::Message(ref msg) = update.content {
+                    offset = Some((update.update_id as i64) + 1);
+                    if let Some(ref msg) = update.message {
                         handle_message(&api, &config, &storage, &tx_worker, msg);
                     }
                 }
