@@ -126,6 +126,7 @@ fn main() {
                     Ok(WorkerSignal::ForcePublish) => {
                         if running_worker.load(Ordering::SeqCst) {
                             println!("Immediate publish triggered via /force_publish");
+                            last_publish = Instant::now();
                             let _ = publish_next_pin(&api_worker, &config_worker, &storage_worker);
                         }
                     }

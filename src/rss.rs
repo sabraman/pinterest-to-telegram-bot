@@ -11,6 +11,20 @@ use regex::Regex;
 use std::collections::HashSet;
 use std::sync::OnceLock;
 
+pub fn normalize_pub_date(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return chrono::Utc::now().to_rfc3339();
+    }
+    if let Ok(dt) = chrono::DateTime::parse_from_rfc2822(trimmed) {
+        return dt.with_timezone(&chrono::Utc).to_rfc3339();
+    }
+    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(trimmed) {
+        return dt.with_timezone(&chrono::Utc).to_rfc3339();
+    }
+    chrono::Utc::now().to_rfc3339()
+}
+
 pub fn parse_rss_xml(xml: &str) -> Vec<Pin> {
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(true);
@@ -43,6 +57,18 @@ pub fn parse_rss_xml(xml: &str) -> Vec<Pin> {
             Event::Text(e) => {
                 if in_item {
                     let text = e.unescape().unwrap_or_default().to_string();
+                    match current_tag.to_lowercase().as_str() {
+                        "guid" | "id" => guid.push_str(&text),
+                        "link" => link.push_str(&text),
+                        "description" | "content" | "summary" => description.push_str(&text),
+                        "pubdate" | "published" | "updated" => pub_date.push_str(&text),
+                        _ => {}
+                    }
+                }
+            }
+            Event::CData(e) => {
+                if in_item {
+                    let text = String::from_utf8_lossy(e.as_ref()).to_string();
                     match current_tag.to_lowercase().as_str() {
                         "guid" | "id" => guid.push_str(&text),
                         "link" => link.push_str(&text),
@@ -103,7 +129,7 @@ pub fn parse_rss_xml(xml: &str) -> Vec<Pin> {
                         media_items: unique_items,
                         source_url: if link.is_empty() { None } else { Some(link.clone()) },
                         published: false,
-                        pub_date: pub_date.clone(),
+                        pub_date: normalize_pub_date(&pub_date),
                     });
                 }
                 current_tag.clear();
@@ -215,5 +241,39 @@ mod tests {
         assert_eq!(pins.len(), 1);
         assert_eq!(pins[0].guid, "https://www.pinterest.com/pin/12345/");
         assert_eq!(pins[0].image_url, "https://i.pinimg.com/originals/12/34/56/123456789.jpg");
+        assert_eq!(pins[0].pub_date, "2026-01-01T00:00:00+00:00");
+    }
+
+    #[test]
+    fn test_parse_rss_cdata() {
+        let sample_cdata = r#"
+        <rss version="2.0">
+            <channel>
+                <item>
+                    <guid>https://www.pinterest.com/pin/67890/</guid>
+                    <link>https://www.pinterest.com/pin/67890/</link>
+                    <description><![CDATA[<p><img src="https://i.pinimg.com/originals/ab/cd/ef/abcdef.jpg" /></p>]]></description>
+                    <pubDate>Thu, 22 Oct 2026 01:23:45 GMT</pubDate>
+                </item>
+            </channel>
+        </rss>"#;
+
+        let pins = parse_rss_xml(sample_cdata);
+        assert_eq!(pins.len(), 1);
+        assert_eq!(pins[0].guid, "https://www.pinterest.com/pin/67890/");
+        assert_eq!(pins[0].image_url, "https://i.pinimg.com/originals/ab/cd/ef/abcdef.jpg");
+        assert_eq!(pins[0].pub_date, "2026-10-22T01:23:45+00:00");
+    }
+
+    #[test]
+    fn test_normalize_pub_date() {
+        assert_eq!(
+            normalize_pub_date("Mon, 01 Jan 2026 00:00:00 +0000"),
+            "2026-01-01T00:00:00+00:00"
+        );
+        assert_eq!(
+            normalize_pub_date("2026-01-01T00:00:00Z"),
+            "2026-01-01T00:00:00+00:00"
+        );
     }
 }

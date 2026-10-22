@@ -5,6 +5,7 @@ use chrono::Utc;
 use frankenstein::client_ureq::Bot;
 use frankenstein::methods::{GetUpdatesParams, SendMessageParams};
 use frankenstein::types::Message;
+use frankenstein::updates::UpdateContent;
 use frankenstein::TelegramApi;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
@@ -38,16 +39,26 @@ pub fn handle_message(
         None => return,
     };
 
+    if !text.starts_with('/') {
+        return;
+    }
+
+    let cmd = text
+        .split_whitespace()
+        .next()
+        .unwrap_or("")
+        .split('@')
+        .next()
+        .unwrap_or("");
+
     let chat_id = message.chat.id;
     let from_id = message.from.as_ref().map(|u| u.id as i64).unwrap_or(0);
     let is_admin = from_id == config.admin_id;
 
-    let response = if text == "/start" {
-        "Pinterest-to-Telegram Bot\n\nSend /help to view available commands".to_string()
-    } else if text == "/help" {
-        "Available commands:\n/status - Show system status\n/force_publish - Publish next pin (admin only)\n/clear - Clear storage (admin only)\n/reset_published - Reset publication status (admin only)".to_string()
-    } else if text == "/status" {
-        match storage.get_stats() {
+    let response = match cmd {
+        "/start" => "Pinterest-to-Telegram Bot\n\nSend /help to view available commands".to_string(),
+        "/help" => "Available commands:\n/status - Show system status\n/force_publish - Publish next pin (admin only)\n/clear - Clear storage (admin only)\n/reset_published - Reset publication status (admin only)".to_string(),
+        "/status" => match storage.get_stats() {
             Ok(stats) => {
                 let eta = format_queue_finish_eta(stats.pending, config.publish_poll_seconds as i64, Utc::now());
                 format!(
@@ -56,34 +67,36 @@ pub fn handle_message(
                 )
             }
             Err(e) => format!("Error reading stats: {}", e),
-        }
-    } else if text == "/force_publish" {
-        if !is_admin {
-            "Access denied. Admin only command.".to_string()
-        } else {
-            let _ = tx_worker.send(WorkerSignal::ForcePublish);
-            "Publish cycle triggered.".to_string()
-        }
-    } else if text == "/clear" {
-        if !is_admin {
-            "Access denied. Admin only command.".to_string()
-        } else {
-            match storage.clear_storage() {
-                Ok(count) => format!("Storage cleared. Removed {} pins", count),
-                Err(e) => format!("Error clearing storage: {}", e),
+        },
+        "/force_publish" => {
+            if !is_admin {
+                "Access denied. Admin only command.".to_string()
+            } else {
+                let _ = tx_worker.send(WorkerSignal::ForcePublish);
+                "Publish cycle triggered.".to_string()
             }
         }
-    } else if text == "/reset_published" {
-        if !is_admin {
-            "Access denied. Admin only command.".to_string()
-        } else {
-            match storage.reset_published() {
-                Ok(count) => format!("Reset {} pins to pending.", count),
-                Err(e) => format!("Error resetting pins: {}", e),
+        "/clear" => {
+            if !is_admin {
+                "Access denied. Admin only command.".to_string()
+            } else {
+                match storage.clear_storage() {
+                    Ok(count) => format!("Storage cleared. Removed {} pins", count),
+                    Err(e) => format!("Error clearing storage: {}", e),
+                }
             }
         }
-    } else {
-        "Use /help to view available commands".to_string()
+        "/reset_published" => {
+            if !is_admin {
+                "Access denied. Admin only command.".to_string()
+            } else {
+                match storage.reset_published() {
+                    Ok(count) => format!("Reset {} pins to pending.", count),
+                    Err(e) => format!("Error resetting pins: {}", e),
+                }
+            }
+        }
+        _ => "Use /help to view available commands".to_string(),
     };
 
     let params = SendMessageParams::builder()
@@ -115,12 +128,20 @@ pub fn run_telegram_poller(
             Ok(response) => {
                 for update in response.result {
                     offset = Some((update.update_id as i64) + 1);
-                    let _ = UpdateContent::Message;
+                    if let UpdateContent::Message(ref msg) = update.content {
+                        handle_message(&api, &config, &storage, &tx_worker, msg);
+                    }
                 }
             }
             Err(err) => {
                 eprintln!("Error in get_updates: {:?}", err);
-                sleep(Duration::from_secs(2));
+                let retry_delay = match &err {
+                    frankenstein::Error::Api(api_err) => {
+                        api_err.parameters.as_ref().and_then(|p| p.retry_after).map(|s| s as u64).unwrap_or(2)
+                    }
+                    _ => 2,
+                };
+                sleep(Duration::from_secs(retry_delay.max(1).min(60)));
             }
         }
     }

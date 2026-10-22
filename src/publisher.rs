@@ -3,6 +3,7 @@ use crate::scraper::is_content_media_url;
 use crate::storage::Storage;
 use crate::types::{MediaItem, MediaType};
 use frankenstein::client_ureq::Bot;
+use frankenstein::input_file::FileUpload;
 use frankenstein::input_media::{InputMediaPhoto, InputMediaVideo, MediaGroupInputMedia};
 use frankenstein::methods::{
     SendAnimationParams, SendMediaGroupParams, SendPhotoParams, SendVideoParams,
@@ -11,16 +12,32 @@ use frankenstein::TelegramApi;
 use std::thread::sleep;
 use std::time::Duration;
 
-pub fn assert_media_available(url: &str, timeout_secs: u64) -> Result<(), String> {
+#[derive(Debug)]
+pub enum MediaCheckError {
+    Permanent(String),
+    Transient(String),
+}
+
+pub fn assert_media_available(url: &str, timeout_secs: u64) -> Result<(), MediaCheckError> {
     let timeout = Duration::from_secs(timeout_secs);
     let head_res = ureq::head(url)
         .timeout(timeout)
         .set("User-Agent", "pinterest-to-telegram-bot/1.0")
         .call();
 
-    if let Ok(res) = head_res {
-        if res.status() < 400 {
-            return Ok(());
+    match head_res {
+        Ok(res) => {
+            if res.status() < 400 {
+                return Ok(());
+            } else if res.status() == 404 || res.status() == 403 || res.status() == 410 {
+                return Err(MediaCheckError::Permanent(format!("Media returned HTTP {}", res.status())));
+            }
+        }
+        Err(ureq::Error::Status(code, _)) if code == 404 || code == 403 || code == 410 => {
+            return Err(MediaCheckError::Permanent(format!("Media returned HTTP {}", code)));
+        }
+        Err(_) => {
+            // Head might not be supported or timed out, attempt byte range GET
         }
     }
 
@@ -28,30 +45,41 @@ pub fn assert_media_available(url: &str, timeout_secs: u64) -> Result<(), String
         .timeout(timeout)
         .set("User-Agent", "pinterest-to-telegram-bot/1.0")
         .set("Range", "bytes=0-0")
-        .call()
-        .map_err(|e| format!("Media returned HTTP error: {}", e))?;
+        .call();
 
-    if range_res.status() < 400 {
-        Ok(())
-    } else {
-        Err(format!("Media returned HTTP {}", range_res.status()))
+    match range_res {
+        Ok(res) => {
+            if res.status() < 400 {
+                Ok(())
+            } else if res.status() == 404 || res.status() == 403 || res.status() == 410 {
+                Err(MediaCheckError::Permanent(format!("Media returned HTTP {}", res.status())))
+            } else {
+                Err(MediaCheckError::Transient(format!("Media returned HTTP {}", res.status())))
+            }
+        }
+        Err(ureq::Error::Status(code, _)) => {
+            if code == 404 || code == 403 || code == 410 {
+                Err(MediaCheckError::Permanent(format!("Media returned HTTP {}", code)))
+            } else {
+                Err(MediaCheckError::Transient(format!("Media returned HTTP {}", code)))
+            }
+        }
+        Err(ureq::Error::Transport(e)) => {
+            Err(MediaCheckError::Transient(format!("Network transport error: {}", e)))
+        }
     }
 }
 
-pub fn send_media(api: &Bot, channel_id: &str, media_items: &[MediaItem]) -> Result<(), String> {
-    if media_items.is_empty() {
-        return Err("Pin has no media items".to_string());
-    }
-
+pub fn send_media(api: &Bot, channel_id: &str, media_items: &[MediaItem]) -> Result<(), frankenstein::Error> {
     if media_items.len() > 1 && media_items.iter().all(|i| i.media_type == MediaType::Photo || i.media_type == MediaType::Video) {
         let group = media_items
             .iter()
             .take(10)
             .map(|item| {
                 if item.media_type == MediaType::Video {
-                    MediaGroupInputMedia::Video(InputMediaVideo::builder().media(item.url.clone()).build())
+                    MediaGroupInputMedia::Video(InputMediaVideo::builder().media(FileUpload::String(item.url.clone())).build())
                 } else {
-                    MediaGroupInputMedia::Photo(InputMediaPhoto::builder().media(item.url.clone()).build())
+                    MediaGroupInputMedia::Photo(InputMediaPhoto::builder().media(FileUpload::String(item.url.clone())).build())
                 }
             })
             .collect::<Vec<_>>();
@@ -61,36 +89,33 @@ pub fn send_media(api: &Bot, channel_id: &str, media_items: &[MediaItem]) -> Res
             .media(group)
             .build();
 
-        api.send_media_group(&params)
-            .map_err(|e| format!("Failed to send media group: {:?}", e))?;
+        api.send_media_group(&params)?;
         return Ok(());
     }
 
-    let item = &media_items[0];
-    match item.media_type {
-        MediaType::Video => {
-            let params = SendVideoParams::builder()
-                .chat_id(channel_id.to_string())
-                .video(item.url.clone())
-                .build();
-            api.send_video(&params)
-                .map_err(|e| format!("Failed to send video: {:?}", e))?;
-        }
-        MediaType::Animation => {
-            let params = SendAnimationParams::builder()
-                .chat_id(channel_id.to_string())
-                .animation(item.url.clone())
-                .build();
-            api.send_animation(&params)
-                .map_err(|e| format!("Failed to send animation: {:?}", e))?;
-        }
-        MediaType::Photo => {
-            let params = SendPhotoParams::builder()
-                .chat_id(channel_id.to_string())
-                .photo(item.url.clone())
-                .build();
-            api.send_photo(&params)
-                .map_err(|e| format!("Failed to send photo: {:?}", e))?;
+    if let Some(item) = media_items.first() {
+        match item.media_type {
+            MediaType::Video => {
+                let params = SendVideoParams::builder()
+                    .chat_id(channel_id.to_string())
+                    .video(FileUpload::String(item.url.clone()))
+                    .build();
+                api.send_video(&params)?;
+            }
+            MediaType::Animation => {
+                let params = SendAnimationParams::builder()
+                    .chat_id(channel_id.to_string())
+                    .animation(FileUpload::String(item.url.clone()))
+                    .build();
+                api.send_animation(&params)?;
+            }
+            MediaType::Photo => {
+                let params = SendPhotoParams::builder()
+                    .chat_id(channel_id.to_string())
+                    .photo(FileUpload::String(item.url.clone()))
+                    .build();
+                api.send_photo(&params)?;
+            }
         }
     }
 
@@ -117,6 +142,12 @@ pub fn publish_next_pin(api: &Bot, config: &Config, storage: &Storage) -> Result
         pin.media_items.into_iter().take(1).collect::<Vec<_>>()
     };
 
+    if media_to_publish.is_empty() {
+        let err = "Pin has no media items".to_string();
+        let _ = storage.mark_skipped(&pin.guid, &lock_token, &err);
+        return Ok(false);
+    }
+
     for item in &media_to_publish {
         if !is_content_media_url(&item.url) {
             let err = format!("Invalid Pinterest media URL: {}", item.url);
@@ -124,8 +155,15 @@ pub fn publish_next_pin(api: &Bot, config: &Config, storage: &Storage) -> Result
             return Ok(false);
         }
 
-        if let Err(e) = assert_media_available(&item.url, config.fetch_timeout_seconds) {
-            let _ = storage.mark_skipped(&pin.guid, &lock_token, &e);
+        if let Err(check_err) = assert_media_available(&item.url, config.fetch_timeout_seconds) {
+            match check_err {
+                MediaCheckError::Permanent(e) => {
+                    let _ = storage.mark_skipped(&pin.guid, &lock_token, &e);
+                }
+                MediaCheckError::Transient(e) => {
+                    let _ = storage.mark_failed(&pin.guid, &lock_token, &e);
+                }
+            }
             return Ok(false);
         }
     }
@@ -138,12 +176,19 @@ pub fn publish_next_pin(api: &Bot, config: &Config, storage: &Storage) -> Result
             Ok(true)
         }
         Err(e) => {
-            if e.contains("400") || e.contains("404") {
-                let _ = storage.mark_skipped(&pin.guid, &lock_token, &e);
+            let is_permanent = match &e {
+                frankenstein::Error::Api(api_err) => {
+                    api_err.error_code == 400 || api_err.error_code == 404
+                }
+                _ => false,
+            };
+            let err_msg = format!("{:?}", e);
+            if is_permanent {
+                let _ = storage.mark_skipped(&pin.guid, &lock_token, &err_msg);
             } else {
-                let _ = storage.mark_failed(&pin.guid, &lock_token, &e);
+                let _ = storage.mark_failed(&pin.guid, &lock_token, &err_msg);
             }
-            Err(e)
+            Err(err_msg)
         }
     }
 }

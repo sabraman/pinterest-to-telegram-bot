@@ -82,21 +82,23 @@ fn media_rank(media_type: MediaType) -> u8 {
 }
 
 pub fn unique_media_items(items: Vec<MediaItem>) -> Vec<MediaItem> {
+    let mut order: Vec<String> = Vec::new();
     let mut map: HashMap<String, MediaItem> = HashMap::new();
     for item in items {
         if item.url.is_empty() {
             continue;
         }
         let identity = media_identity(&item.url);
-        if let Some(existing) = map.get(&identity) {
+        if let Some(existing) = map.get_mut(&identity) {
             if media_rank(item.media_type) > media_rank(existing.media_type) {
-                map.insert(identity, item);
+                *existing = item;
             }
         } else {
+            order.push(identity.clone());
             map.insert(identity, item);
         }
     }
-    map.into_values().collect()
+    order.into_iter().filter_map(|k| map.remove(&k)).collect()
 }
 
 pub fn decode_html(val: &str) -> String {
@@ -166,5 +168,31 @@ mod tests {
             normalize_pinterest_image(raw),
             "https://i.pinimg.com/originals/ab/cd/ef/abcdef12345.jpg"
         );
+    }
+
+    #[test]
+    fn test_unique_media_items_order_and_rank() {
+        let items = vec![
+            MediaItem {
+                media_type: MediaType::Photo,
+                url: "https://i.pinimg.com/originals/11/11/11/hash1.jpg".to_string(),
+            },
+            MediaItem {
+                media_type: MediaType::Photo,
+                url: "https://i.pinimg.com/originals/22/22/22/hash2.jpg".to_string(),
+            },
+            MediaItem {
+                media_type: MediaType::Video,
+                url: "https://v.pinimg.com/videos/mc/720p/11/11/11/hash1.mp4".to_string(),
+            },
+        ];
+
+        let result = unique_media_items(items);
+        assert_eq!(result.len(), 2);
+        // hash1 upgraded to video, but preserved first position in queue
+        assert_eq!(result[0].media_type, MediaType::Video);
+        assert_eq!(result[0].url, "https://v.pinimg.com/videos/mc/720p/11/11/11/hash1.mp4");
+        assert_eq!(result[1].media_type, MediaType::Photo);
+        assert_eq!(result[1].url, "https://i.pinimg.com/originals/22/22/22/hash2.jpg");
     }
 }

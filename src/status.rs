@@ -2,9 +2,10 @@ use chrono::{DateTime, Duration, Utc};
 use chrono_tz::Europe::Moscow;
 
 pub fn format_duration(total_seconds: i64) -> String {
-    let days = total_seconds / 86_400;
-    let hours = (total_seconds % 86_400) / 3_600;
-    let minutes = ((total_seconds % 3_600) + 59) / 60;
+    let total_minutes = (total_seconds + 59) / 60;
+    let days = total_minutes / 1440;
+    let hours = (total_minutes % 1440) / 60;
+    let minutes = total_minutes % 60;
 
     let mut parts = Vec::new();
     if days > 0 {
@@ -64,5 +65,16 @@ mod tests {
         let base_time = Utc.with_ymd_and_hms(2026, 5, 10, 0, 0, 0).unwrap();
         let eta = format_queue_finish_eta(0, 900, base_time);
         assert_eq!(eta, "No pending pins");
+    }
+
+    #[test]
+    fn test_format_duration_ceiling_rollover() {
+        // 3541 seconds is 59 minutes and 1 second.
+        // It should round up to 60 minutes = 1 hour (NOT "1h 60m" or "60m")
+        assert_eq!(format_duration(3541), "1h");
+        // 3661 seconds is 1 hour, 1 minute and 1 second => 1h 2m
+        assert_eq!(format_duration(3661), "1h 2m");
+        // 0 seconds => 0m
+        assert_eq!(format_duration(0), "0m");
     }
 }

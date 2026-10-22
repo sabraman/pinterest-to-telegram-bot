@@ -59,7 +59,8 @@ impl Storage {
                  lock_token TEXT
              );
              CREATE INDEX IF NOT EXISTS idx_pins_status_created ON pins(status, created_at);
-             CREATE INDEX IF NOT EXISTS idx_pins_locked_until ON pins(locked_until);",
+             CREATE INDEX IF NOT EXISTS idx_pins_locked_until ON pins(locked_until);
+             CREATE INDEX IF NOT EXISTS idx_pins_image_url ON pins(image_url);",
         )?;
         Ok(())
     }
@@ -147,7 +148,7 @@ impl Storage {
                      OR (status = 'failed' AND (locked_until IS NULL OR locked_until <= ?2))
                      OR (status = 'processing' AND locked_until <= ?3)
                    )
-                 ORDER BY datetime(pub_date) ASC, datetime(created_at) ASC
+                 ORDER BY COALESCE(datetime(pub_date), datetime(created_at)) ASC, datetime(created_at) ASC, rowid ASC
                  LIMIT 1",
                 params![self.config.max_publish_attempts, now, now],
                 |row| row.get(0),
@@ -221,17 +222,26 @@ impl Storage {
     pub fn mark_failed(&self, guid: &str, lock_token: &str, error: &str) -> Result<bool> {
         let conn = self.conn.lock().unwrap();
         let now = Utc::now().timestamp();
-        let retry_at = now + self.config.publish_retry_seconds;
         let count = conn.execute(
             "UPDATE pins
              SET status = 'failed',
                  last_error = ?1,
-                 locked_until = CASE WHEN attempts >= ?2 THEN NULL ELSE ?3 END,
+                 locked_until = CASE
+                     WHEN attempts >= ?2 THEN NULL
+                     ELSE ?3 + (?4 * (1 << CASE WHEN attempts > 5 THEN 5 ELSE (attempts - 1) END))
+                 END,
                  lock_token = NULL
-             WHERE guid = ?4
+             WHERE guid = ?5
                AND status = 'processing'
-               AND lock_token = ?5",
-            params![error, self.config.max_publish_attempts, retry_at, guid, lock_token],
+               AND lock_token = ?6",
+            params![
+                error,
+                self.config.max_publish_attempts,
+                now,
+                self.config.publish_retry_seconds,
+                guid,
+                lock_token
+            ],
         )?;
         Ok(count > 0)
     }
@@ -387,5 +397,44 @@ mod tests {
         let stats_after = storage.get_stats().unwrap();
         assert_eq!(stats_after.done, 1);
         assert_eq!(stats_after.pending, 0);
+    }
+
+    #[test]
+    fn test_duplicate_and_retry_flow() {
+        let storage = Storage::open_in_memory(mock_config()).unwrap();
+        let pin = Pin {
+            guid: "test-guid-dup".to_string(),
+            image_url: "https://i.pinimg.com/originals/dup.jpg".to_string(),
+            media_type: MediaType::Photo,
+            media_items: vec![MediaItem {
+                media_type: MediaType::Photo,
+                url: "https://i.pinimg.com/originals/dup.jpg".to_string(),
+            }],
+            source_url: None,
+            published: false,
+            pub_date: "2026-01-01T00:00:00Z".to_string(),
+        };
+
+        storage.save_pin(&pin).unwrap();
+        assert!(storage.has_media_url("https://i.pinimg.com/originals/dup.jpg", "other-guid").unwrap());
+        assert!(!storage.has_media_url("https://i.pinimg.com/originals/dup.jpg", "test-guid-dup").unwrap());
+
+        let claimed = storage.claim_next_pin().unwrap().expect("claimed");
+        let token = claimed.lock_token.unwrap();
+
+        // Mark failed
+        assert!(storage.mark_failed("test-guid-dup", &token, "Transient network timeout").unwrap());
+        let stats = storage.get_stats().unwrap();
+        assert_eq!(stats.failed, 1);
+
+        // Reset published
+        assert_eq!(storage.reset_published().unwrap(), 1);
+        let stats_reset = storage.get_stats().unwrap();
+        assert_eq!(stats_reset.pending, 1);
+
+        // Clear
+        assert_eq!(storage.clear_storage().unwrap(), 1);
+        let stats_empty = storage.get_stats().unwrap();
+        assert_eq!(stats_empty.total, 0);
     }
 }
