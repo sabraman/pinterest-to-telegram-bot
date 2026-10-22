@@ -1,12 +1,13 @@
-FROM oven/bun:1.3.3-alpine
-
+FROM rust:alpine AS builder
+RUN apk add --no-cache musl-dev pkgconfig openssl-dev sqlite-dev
 WORKDIR /app
-
-COPY package.json bun.lock ./
-RUN bun install --frozen-lockfile --production
-
+COPY Cargo.toml ./
 COPY src ./src
-COPY tsconfig.json ./
+RUN cargo build --release
 
-ENV NODE_ENV=production
-CMD ["bun", "run", "start"]
+FROM alpine:latest
+RUN apk add --no-cache ca-certificates libgcc
+WORKDIR /app
+COPY --from=builder /app/target/release/pinterest-to-telegram-bot /usr/local/bin/bot
+VOLUME ["/app/data"]
+CMD ["bot"]
