@@ -61,6 +61,7 @@ jobs:
           rsync -az --delete \
             --exclude '.git' \
             --exclude '.github' \
+            --exclude 'target' \
             --exclude 'node_modules' \
             --exclude 'data' \
             --exclude '.env' \
